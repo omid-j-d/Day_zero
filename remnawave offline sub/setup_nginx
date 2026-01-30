@@ -1,0 +1,81 @@
+#!/bin/bash
+set -e
+
+echo "🔧 NGINX First-time Setup"
+
+read -p "➡️  Listen port (default 80): " PORT
+PORT=${PORT:-80}
+
+read -p "➡️  Server IP or domain (e.g. 1.2.3.4 or sub.example.com): " SERVER_NAME
+
+read -p "🔐 Enable SSL? (y/n): " ENABLE_SSL
+
+SSL_BLOCK=""
+
+if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
+    read -p "📄 SSL certificate path (fullchain.pem): " SSL_CERT
+    read -p "🔑 SSL key path (privkey.pem): " SSL_KEY
+
+    SSL_BLOCK="
+    listen $PORT ssl;
+    listen [::]:$PORT ssl;
+
+    ssl_certificate $SSL_CERT;
+    ssl_certificate_key $SSL_KEY;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    "
+else
+    SSL_BLOCK="
+    listen $PORT;
+    listen [::]:$PORT;
+    "
+fi
+
+echo "📦 Installing nginx..."
+apt update -y
+apt install nginx -y
+
+echo "🧹 Cleaning old enabled sites..."
+rm -f /etc/nginx/sites-enabled/*
+
+echo "📁 Creating web root..."
+mkdir -p /var/www/subs
+chown -R www-data:www-data /var/www/subs
+chmod 755 /var/www/subs
+
+echo "📝 Writing nginx config..."
+
+cat > /etc/nginx/sites-available/subs <<EOF
+server {
+    $SSL_BLOCK
+
+    server_name $SERVER_NAME;
+
+    root /var/www/subs;
+    index index.html;
+
+    location / {
+        autoindex off;
+        try_files \$uri =404;
+    }
+
+    access_log /var/log/nginx/subs.access.log;
+    error_log  /var/log/nginx/subs.error.log;
+}
+EOF
+
+echo "🔗 Enabling site..."
+ln -sf /etc/nginx/sites-available/subs /etc/nginx/sites-enabled/subs
+
+echo "🧪 Testing nginx config..."
+nginx -t
+
+echo "🔄 Restarting nginx..."
+systemctl restart nginx
+systemctl enable nginx
+
+echo "✅ DONE"
+echo "📂 Put snapshot files in: /var/www/subs"
+echo "🌐 Access: http(s)://$SERVER_NAME:$PORT/FILE"
